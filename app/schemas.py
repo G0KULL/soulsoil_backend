@@ -1,30 +1,72 @@
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from datetime import datetime
+from beanie import PydanticObjectId
+from .models import IDProofType
 
 class UserBase(BaseModel):
     email: EmailStr
     fullname: str
+    mobile_number: Optional[str] = None
+    address: Optional[str] = None
+    nationality: Optional[str] = None
+    id_proof_type: Optional[IDProofType] = None
+    gst_number: Optional[str] = None
 
 class UserCreate(UserBase):
-    password: str
-    mobile_number: Optional[str] = None
+    password: Optional[str] = None # Optional because social signup might not have password
 
 class UserLogin(BaseModel):
     email: Optional[EmailStr] = None
     mobile_number: Optional[str] = None
-    password: str
+    password: Optional[str] = None
 
-    # Ensure either email or mobile_number is provided
-    def check_at_least_one(self):
-        if not self.email and not self.mobile_number:
-            raise ValueError("Either email or mobile_number must be provided")
-        return self
+class SocialLogin(BaseModel):
+    token: str
+    provider: str # 'google' or 'facebook'
 
-class UserSchema(UserBase):
-    id: int
-    mobile_number: Optional[str]
+class OTPRequest(BaseModel):
+    mobile_number: str
+
+class OTPVerify(BaseModel):
+    mobile_number: str
+    otp: str
+
+class EmailVerify(BaseModel):
+    email: EmailStr
+    otp: str
+
+class UserResponse(UserBase):
+    id: PydanticObjectId = Field(alias="_id")
+    is_email_verified: bool
+    is_phone_verified: bool
+    id_proof_url: Optional[str] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+        populate_by_name = True
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    email: Optional[str] = None
+    id: Optional[str] = None
+
+class AgricultureSoftwareCreate(BaseModel):
+    title: str
+    description: str
+
+class AgricultureSoftwareResponse(BaseModel):
+    id: PydanticObjectId = Field(alias="_id")
+    title: str
+    description: str
+    image_url: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True

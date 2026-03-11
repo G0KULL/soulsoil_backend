@@ -1,21 +1,16 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from motor.motor_asyncio import AsyncIOMotorClient
+from beanie import init_beanie
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/soulsoil")
+DATABASE_URL = os.getenv("DATABASE_URL", "mongodb://localhost:27017/soulsoil")
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-Base = declarative_base()
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def init_db():
+    client = AsyncIOMotorClient(DATABASE_URL)
+    # Extract database name from connection string or default to 'soulsoil'
+    default_db = client.get_default_database()
+    db_name = default_db.name if default_db is not None else "soulsoil"
+    from .models import User, AgricultureSoftware
+    await init_beanie(database=client[db_name], document_models=[User, AgricultureSoftware])
