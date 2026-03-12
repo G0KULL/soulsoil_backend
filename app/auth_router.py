@@ -4,17 +4,25 @@ from typing import Optional
 from datetime import datetime, timedelta, timezone
 import shutil
 import os
+import random
+import string
 from jose import JWTError, jwt
 from .models import User, IDProofType
 from .schemas import (
     UserResponse, OTPRequest, OTPVerify, SocialLogin, 
-    EmailVerify, UserLogin, Token, TokenData
+    EmailVerify, UserLogin, Token, TokenData,
+    ForgotPasswordRequest, ResetPassword
 )
 from .security import (
     get_password_hash, verify_password, create_access_token, 
     SECRET_KEY, ALGORITHM
 )
 from pydantic import EmailStr
+from .mail import send_otp_email
+
+def generate_otp(length: int = 6) -> str:
+    """Generates a random numeric OTP of specified length."""
+    return "".join(random.choices(string.digits, k=length))
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
@@ -54,6 +62,9 @@ async def register(
     gst_number: Optional[str] = Form(None),
     id_proof_file: UploadFile = File(...)
 ):
+    # Normalize email
+    email = email.lower()
+
     # Check if user already exists
     if await User.find_one(User.email == email):
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -90,7 +101,8 @@ async def login(credentials: UserLogin):
     # Find user by email or mobile
     user = None
     if credentials.email:
-        user = await User.find_one(User.email == credentials.email)
+        email = credentials.email.lower()
+        user = await User.find_one(User.email == email)
     elif credentials.mobile_number:
         user = await User.find_one(User.mobile_number == credentials.mobile_number)
     
@@ -112,7 +124,7 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
 
 @router.post("/otp/send")
 async def send_otp(request: OTPRequest):
-    otp = "123456" # Mock OTP
+    otp = generate_otp()
     user = await User.find_one(User.mobile_number == request.mobile_number)
     
     if not user:
@@ -134,7 +146,7 @@ async def verify_otp(request: OTPVerify):
     if user.otp != request.otp:
         raise HTTPException(status_code=400, detail="Invalid OTP")
     
-    if user.otp_expiry < datetime.now(timezone.utc):
+    if user.otp_expiry and user.otp_expiry.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="OTP expired")
     
     user.is_phone_verified = True
@@ -173,16 +185,107 @@ async def social_login(request: SocialLogin):
     access_token = create_access_token(data={"sub": str(user.id)})
     return {"access_token": access_token, "token_type": "bearer"}
 
+@router.post("/email/send-otp")
+async def send_email_otp(request: OTPRequest):
+    # This expects mobile_number but we want email in request
+    # Actually schema OTPRequest has mobile_number. Let's use EmailVerify schema or similar?
+    # Better yet, let's just use request.mobile_number string as email if it looks like one,
+    # or add a new schema. For now, I'll use request.mobile_number as a generic identity.
+    identity = request.mobile_number
+    user = None
+    if "@" in identity:
+        user = await User.find_one(User.email == identity.lower())
+    else:
+        user = await User.find_one(User.mobile_number == identity)
+        
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    otp = generate_otp()
+    user.otp = otp
+    user.otp_expiry = datetime.now(timezone.utc) + timedelta(minutes=10)
+    await user.save()
+    
+    email_sent = False
+    if "@" in identity:
+        email_sent = await send_otp_email(identity, otp, type="verification")
+    
+    return {
+        "message": "OTP sent successfully" + (" to your email" if email_sent else ""),
+        "otp": otp if not email_sent else None
+    }
+
 @router.post("/email/verify")
 async def verify_email(request: EmailVerify):
-    user = await User.find_one(User.email == request.email)
+    email = request.email.lower()
+    user = await User.find_one(User.email == email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Mock email code: 654321
-    if request.otp == "654321":
-        user.is_email_verified = True
-        await user.save()
-        return {"message": "Email verified successfully"}
-    else:
+    if not user.otp:
+        raise HTTPException(status_code=400, detail="No OTP requested")
+    
+    if user.otp != request.otp:
         raise HTTPException(status_code=400, detail="Invalid verification code")
+    
+    if user.otp_expiry and user.otp_expiry.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Verification code expired")
+
+    user.is_email_verified = True
+    user.otp = None
+    await user.save()
+    return {"message": "Email verified successfully"}
+
+@router.post("/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    user = None
+    if request.email:
+        email = request.email.lower()
+        user = await User.find_one(User.email == email)
+    elif request.mobile_number:
+        user = await User.find_one(User.mobile_number == request.mobile_number)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    otp = generate_otp()
+    user.otp = otp
+    user.otp_expiry = datetime.now(timezone.utc) + timedelta(minutes=10)
+    await user.save()
+    
+    # Try to send real email if identity is email
+    email_sent = False
+    if request.email:
+        email_sent = await send_otp_email(email, otp, type="password_reset")
+    
+    message = f"Reset code sent successfully"
+    if email_sent:
+        message += " to your email"
+    else:
+        message += f": {otp}" # Fallback to showing it if email fails or it's mobile
+        
+    return {"message": message, "identity": request.email or request.mobile_number}
+
+@router.post("/reset-password")
+async def reset_password(request: ResetPassword):
+    user = None
+    if request.email:
+        email = request.email.lower()
+        user = await User.find_one(User.email == email)
+    elif request.mobile_number:
+        user = await User.find_one(User.mobile_number == request.mobile_number)
+    
+    if not user or not user.otp:
+        raise HTTPException(status_code=400, detail="No reset request found")
+    
+    if user.otp != request.otp:
+        raise HTTPException(status_code=400, detail="Invalid reset code")
+    
+    if user.otp_expiry and user.otp_expiry.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Reset code expired")
+    
+    user.hashed_password = get_password_hash(request.new_password)
+    user.otp = None
+    await user.save()
+    
+    return {"message": "Password reset successfully"}

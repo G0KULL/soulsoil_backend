@@ -36,6 +36,16 @@ class EmailVerify(BaseModel):
     email: EmailStr
     otp: str
 
+class ForgotPasswordRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    mobile_number: Optional[str] = None
+
+class ResetPassword(BaseModel):
+    email: Optional[EmailStr] = None
+    mobile_number: Optional[str] = None
+    otp: str
+    new_password: str
+
 class UserResponse(UserBase):
     id: PydanticObjectId = Field(alias="_id")
     is_email_verified: bool
