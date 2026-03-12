@@ -9,11 +9,17 @@ class IDProofType(str, Enum):
     passport = "passport"
     emirates_id = "emirates_id"
 
+class UserRole(str, Enum):
+    farmer = "farmer"
+    investor = "investor"
+    admin = "admin"
+
 class User(Document):
     fullname: str
     email: EmailStr = Indexed(unique=True)
     mobile_number: Optional[str] = Indexed(unique=True)
     hashed_password: Optional[str] = None # Optional for social logins
+    role: UserRole = UserRole.farmer # Default to farmer
     
     # New registration fields
     address: Optional[str] = None

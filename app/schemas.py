@@ -2,7 +2,7 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from datetime import datetime
 from beanie import PydanticObjectId
-from .models import IDProofType
+from .models import IDProofType, UserRole
 
 class UserBase(BaseModel):
     email: EmailStr
@@ -11,6 +11,7 @@ class UserBase(BaseModel):
     address: Optional[str] = None
     nationality: Optional[str] = None
     id_proof_type: Optional[IDProofType] = None
+    role: Optional[UserRole] = UserRole.farmer
     gst_number: Optional[str] = None
 
 class UserCreate(UserBase):
@@ -60,6 +61,7 @@ class UserResponse(UserBase):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    role: UserRole
 
 class TokenData(BaseModel):
     email: Optional[str] = None

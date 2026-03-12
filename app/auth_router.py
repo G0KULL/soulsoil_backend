@@ -7,7 +7,7 @@ import os
 import random
 import string
 from jose import JWTError, jwt
-from .models import User, IDProofType
+from .models import User, IDProofType, UserRole
 from .schemas import (
     UserResponse, OTPRequest, OTPVerify, SocialLogin, 
     EmailVerify, UserLogin, Token, TokenData,
@@ -59,6 +59,7 @@ async def register(
     address: Optional[str] = Form(None),
     nationality: Optional[str] = Form(None),
     id_proof_type: IDProofType = Form(...),
+    role: UserRole = Form(UserRole.farmer),
     gst_number: Optional[str] = Form(None),
     id_proof_file: UploadFile = File(...)
 ):
@@ -89,6 +90,7 @@ async def register(
         address=address,
         nationality=nationality,
         id_proof_type=id_proof_type,
+        role=role,
         id_proof_url=file_path,
         gst_number=gst_number
     )
@@ -116,7 +118,11 @@ async def login(credentials: UserLogin):
     access_token = create_access_token(
         data={"sub": str(user.id)}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "role": user.role
+    }
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(current_user: User = Depends(get_current_user)):
@@ -154,7 +160,11 @@ async def verify_otp(request: OTPVerify):
     await user.save()
     
     access_token = create_access_token(data={"sub": str(user.id)})
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "role": user.role
+    }
 
 @router.post("/social-login", response_model=Token)
 async def social_login(request: SocialLogin):
@@ -178,12 +188,17 @@ async def social_login(request: SocialLogin):
             email="social_user@example.com",
             social_provider=provider,
             social_id="social123",
-            is_email_verified=True
+            is_email_verified=True,
+            role=UserRole.farmer
         )
         await user.insert()
     
     access_token = create_access_token(data={"sub": str(user.id)})
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "role": user.role
+    }
 
 @router.post("/email/send-otp")
 async def send_email_otp(request: OTPRequest):
